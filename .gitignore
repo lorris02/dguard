@@ -1,0 +1,25 @@
+# Environment — contains API keys, never commit
+.env
+
+# Database — contains request logs and potentially sensitive content
+*.db
+*.db-shm
+*.db-wal
+
+# Python
+venv/
+__pycache__/
+*.py[cod]
+*.pyo
+.Python
+
+# mitmproxy generated certs/state
+.mitmproxy/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
