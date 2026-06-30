@@ -65,6 +65,7 @@ def _log_request(
 async def proxy_messages(
     request: Request,
     x_user_id: str | None = Header(default=None),
+    x_dguard_confirm: str | None = Header(default=None),
 ):
     body: dict = await request.json()
     model: str | None = body.get("model")
@@ -91,6 +92,26 @@ async def proxy_messages(
             },
         )
 
+    # Soft findings: require explicit confirmation before forwarding
+    if scan.flagged and x_dguard_confirm != "yes":
+        _log_request(
+            user_id=x_user_id,
+            model=model,
+            prompt_text=prompt_text,
+            response_text="",
+            flagged=True,
+            flag_reasons=scan.flag_reasons,
+            blocked=False,
+            status="pending_confirmation",
+        )
+        raise HTTPException(
+            status_code=451,
+            detail={
+                "error": "Sensitive data detected — resend with header X-DGuard-Confirm: yes to proceed",
+                "findings": scan.findings,
+            },
+        )
+
     # Forward to Anthropic
     headers = {
         "x-api-key": ANTHROPIC_API_KEY,
@@ -104,7 +125,7 @@ async def proxy_messages(
         upstream.raise_for_status()
         response_body = upstream.json()
         response_text = response_body.get("content", [{}])[0].get("text", "")
-        status = "success"
+        status = "confirmed" if scan.flagged else "success"
     except httpx.HTTPStatusError as exc:
         response_text = exc.response.text
         status = f"upstream_error_{exc.response.status_code}"

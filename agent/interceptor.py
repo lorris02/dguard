@@ -2,6 +2,7 @@
 mitmproxy addon — loaded via: mitmdump -s agent/interceptor.py
 Scans outbound requests to AI services and blocks or reports them.
 """
+import asyncio
 import json
 import re
 
@@ -10,6 +11,8 @@ from mitmproxy import http
 from agent.ai_targets import is_ai_target
 from agent.config import BLOCK_ENABLED, DEVICE_ID
 from agent.reporter import report_event
+
+_confirm_lock = asyncio.Lock()
 
 # --- inline scanner so agent is self-contained and deployable independently ---
 
@@ -49,24 +52,59 @@ class DGuardInterceptor:
         flag_reasons = ", ".join(findings)
         destination = f"{flow.request.scheme}://{host}{flow.request.path}"
 
+        # Hard block: api keys, aws keys, private keys — no prompt
+        if blocked and BLOCK_ENABLED:
+            await report_event(
+                device_id=DEVICE_ID,
+                destination=destination,
+                content=body,
+                flagged=True,
+                flag_reasons=flag_reasons,
+                blocked=True,
+            )
+            flow.response = http.Response.make(
+                400,
+                json.dumps({"error": "Blocked by DGuard agent", "reasons": findings}),
+                {"Content-Type": "application/json"},
+            )
+            return
+
+        # Soft findings: ask the user before forwarding
+        if flagged and BLOCK_ENABLED:
+            loop = asyncio.get_event_loop()
+            async with _confirm_lock:
+                answer = await loop.run_in_executor(
+                    None,
+                    input,
+                    f"\n[DGuard] Sensitive data detected in request to {destination}\n"
+                    f"  Found: {flag_reasons}\n"
+                    f"  Do you want to send this? [yes/no]: ",
+                )
+            confirmed = answer.strip().lower() == "yes"
+            await report_event(
+                device_id=DEVICE_ID,
+                destination=destination,
+                content=body,
+                flagged=True,
+                flag_reasons=flag_reasons,
+                blocked=not confirmed,
+            )
+            if not confirmed:
+                flow.response = http.Response.make(
+                    400,
+                    json.dumps({"error": "Blocked by DGuard agent — user declined", "reasons": findings}),
+                    {"Content-Type": "application/json"},
+                )
+            return
+
         await report_event(
             device_id=DEVICE_ID,
             destination=destination,
             content=body,
-            flagged=flagged,
-            flag_reasons=flag_reasons,
-            blocked=blocked and BLOCK_ENABLED,
+            flagged=False,
+            flag_reasons="",
+            blocked=False,
         )
-
-        if blocked and BLOCK_ENABLED:
-            flow.response = http.Response.make(
-                400,
-                json.dumps({
-                    "error": "Blocked by DGuard agent",
-                    "reasons": findings,
-                }),
-                {"Content-Type": "application/json"},
-            )
 
 
 addons = [DGuardInterceptor()]
