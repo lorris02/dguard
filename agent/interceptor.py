@@ -35,7 +35,7 @@ def _scan(text: str) -> tuple[list[str], bool, bool]:
 
 
 class DGuardInterceptor:
-    def request(self, flow: http.HTTPFlow) -> None:
+    async def request(self, flow: http.HTTPFlow) -> None:
         host = flow.request.pretty_host
         if not is_ai_target(host):
             return
@@ -49,7 +49,7 @@ class DGuardInterceptor:
         flag_reasons = ", ".join(findings)
         destination = f"{flow.request.scheme}://{host}{flow.request.path}"
 
-        report_event(
+        await report_event(
             device_id=DEVICE_ID,
             destination=destination,
             content=body,

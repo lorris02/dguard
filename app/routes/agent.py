@@ -1,10 +1,11 @@
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
 
+from app.auth import require_api_key
 from app.config import LOG_FULL_CONTENT
 from app.db.models import get_connection
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(require_api_key)])
 
 
 class AgentReport(BaseModel):
